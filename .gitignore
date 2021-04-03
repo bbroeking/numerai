@@ -15,7 +15,13 @@ a.out
 !.vscode/extensions.json
 *.code-workspace
 
+# directiories to ignore
 /data
+/submissions
 
+# hidden files to ignore
+.DS_Store
+.ipynb_checkpoints/
+.vscode/
 # Local History for Visual Studio Code
 .history/
