@@ -11,12 +11,16 @@ import pandas as pd
 import numpy as np
 from xgboost import XGBRegressor
 from models.qurty.data_prep import prepare_data
-from helpers.utils import generate_features_list
+from helpers.utils import generate_features_list, load_model, clean_for_xgboost
+import xgboost
+
+import numerapi
+NAPI = numerapi.NumerAPI(verbosity="info")
 
 TARGET_NAME = f"target"
 PREDICTION_NAME = f"prediction"
 
-MODEL_FILE = Path("qurty/model_query.pickle.dat")
+MODEL_FILE = Path("models/qurty/model_qurty.pickle.dat")
 
 
 # Submissions are scored by spearman correlation
@@ -56,9 +60,8 @@ def read_csv(file_path):
 def main():
     print("Loading data...")
     # The training data is used to train your model how to predict the targets.
-    training_data, tournament_data = prepare_data(ft_corr_list='qurty/qurty_ft_corr_list.pickle.dat')
+    training_data, tournament_data = prepare_data(ft_corr_list='models/qurty/qurty_ft_corr_list.pickle.dat')
     # The tournament data is the data that Numerai uses to evaluate your model.
-
     feature_names = generate_features_list(training_data)
     print(f"Loaded {len(feature_names)} features")
 
@@ -73,40 +76,42 @@ def main():
     #     print("Training model...")
     #     model.fit(training_data[feature_names], training_data[TARGET_NAME])
     #     model.save_model(MODEL_FILE)
-    model = utils.load_model(MODEL_FILE)
+    model = load_model(MODEL_FILE)
 
     # Generate predictions on both training and tournament data
+    X_train, y_train = clean_for_xgboost(training_data)
+    X_test, y_test = clean_for_xgboost(tournament_data)
+    dtrain = xgboost.DMatrix(X_train, y_train)
+    dtest = xgboost.DMatrix(X_test, y_test)
     print("Generating predictions...")
-    training_data.loc[:, PREDICTION_NAME] = model.predict(training_data[feature_names])
-    tournament_data.loc[:, PREDICTION_NAME] = model.predict(tournament_data[feature_names])
+    training_data.loc[:, PREDICTION_NAME] = model.predict(dtrain)
+    tournament_data.loc[:, PREDICTION_NAME] = model.predict(dtest)
 
     # Check the per-era correlations on the training set (in sample)
     train_correlations = training_data.groupby("era").apply(score)
     print(f"On training the correlation has mean {train_correlations.mean()} and std {train_correlations.std(ddof=0)}")
     print(f"On training the average per-era payout is {payout(train_correlations).mean()}")
-
     """Validation Metrics"""
     # Check the per-era correlations on the validation set (out of sample)
     validation_data = tournament_data[tournament_data.data_type == "validation"]
     validation_correlations = validation_data.groupby("era").apply(score)
     print(f"On validation the correlation has mean {validation_correlations.mean()} and "
-          f"std {validation_correlations.std(ddof=0)}")
+        f"std {validation_correlations.std(ddof=0)}")
     print(f"On validation the average per-era payout is {payout(validation_correlations).mean()}")
 
     # Check the "sharpe" ratio on the validation set
     validation_sharpe = validation_correlations.mean() / validation_correlations.std(ddof=0)
     print(f"Validation Sharpe: {validation_sharpe}")
-
     print("checking max drawdown...")
     rolling_max = (validation_correlations + 1).cumprod().rolling(window=100,
-                                                                  min_periods=1).max()
+                                                                min_periods=1).max()
     daily_value = (validation_correlations + 1).cumprod()
     max_drawdown = -((rolling_max - daily_value) / rolling_max).max()
     print(f"max drawdown: {max_drawdown}")
 
     # Check the feature exposure of your validation predictions
     feature_exposures = validation_data[feature_names].apply(lambda d: correlation(validation_data[PREDICTION_NAME], d),
-                                                             axis=0)
+                                                            axis=0)
     max_per_era = validation_data.groupby("era").apply(
         lambda d: d[feature_names].corrwith(d[PREDICTION_NAME]).abs().max())
     max_feature_exposure = max_per_era.mean()
@@ -114,24 +119,22 @@ def main():
 
     # Check feature neutral mean
     print("Calculating feature neutral mean...")
-    feature_neutral_mean = get_feature_neutral_mean(validation_data)
+    feature_neutral_mean = get_feature_neutral_mean(validation_data, X_train.columns)
     print(f"Feature Neutral Mean is {feature_neutral_mean}")
 
     # Load example preds to get MMC metrics
     example_preds = pd.read_csv("example_predictions.csv").set_index("id")["prediction"]
-    validation_example_preds = example_preds.loc[validation_data.index]
+    validation_example_preds = example_preds[validation_data.index].values
     validation_data.loc[:, "ExamplePreds"] = validation_example_preds
-
     print("calculating MMC stats...")
     # MMC over validation
     mmc_scores = []
     corr_scores = []
     for _, x in validation_data.groupby("era"):
         series = neutralize_series(pd.Series(unif(x[PREDICTION_NAME])),
-                                   pd.Series(unif(x["ExamplePreds"])))
+                                pd.Series(unif(x["ExamplePreds"])))
         mmc_scores.append(np.cov(series, x[TARGET_NAME])[0, 1] / (0.29 ** 2))
         corr_scores.append(correlation(unif(x[PREDICTION_NAME]), x[TARGET_NAME]))
-
     val_mmc_mean = np.mean(mmc_scores)
     val_mmc_std = np.std(mmc_scores)
     val_mmc_sharpe = val_mmc_mean / val_mmc_std
@@ -139,22 +142,22 @@ def main():
     corr_plus_mmc_sharpe = np.mean(corr_plus_mmcs) / np.std(corr_plus_mmcs)
     corr_plus_mmc_mean = np.mean(corr_plus_mmcs)
     corr_plus_mmc_sharpe_diff = corr_plus_mmc_sharpe - validation_sharpe
-
     print(
         f"MMC Mean: {val_mmc_mean}\n"
         f"Corr Plus MMC Sharpe:{corr_plus_mmc_sharpe}\n"
         f"Corr Plus MMC Diff:{corr_plus_mmc_sharpe_diff}"
     )
-
     # Check correlation with example predictions
-    full_df = pd.concat([validation_example_preds, validation_data[PREDICTION_NAME], validation_data["era"]], axis=1)
+    full_df = pd.concat([pd.DataFrame(validation_example_preds), validation_data[PREDICTION_NAME], validation_data["era"]], axis=1)
     full_df.columns = ["example_preds", "prediction", "era"]
     per_era_corrs = full_df.groupby('era').apply(lambda d: correlation(unif(d["prediction"]), unif(d["example_preds"])))
     corr_with_example_preds = per_era_corrs.mean()
     print(f"Corr with example preds: {corr_with_example_preds}")
 
     # Save predictions as a CSV and upload to https://numer.ai
-    tournament_data[PREDICTION_NAME].to_csv("submission.csv", header=True)
+    current_round = NAPI.get_current_round()
+    tournament_data.set_index('id', inplace=True)
+    tournament_data[PREDICTION_NAME].to_csv(f"submissions/qurty/submission_{current_round}.csv", header=True)
 
 
 """ 
@@ -223,8 +226,7 @@ def unif(df):
     return pd.Series(x, index=df.index)
 
 
-def get_feature_neutral_mean(df):
-    feature_cols = [c for c in df.columns if c.startswith("feature")]
+def get_feature_neutral_mean(df, feature_cols):
     df.loc[:, "neutral_sub"] = neutralize(df, [PREDICTION_NAME],
                                           feature_cols)[PREDICTION_NAME]
     scores = df.groupby("era").apply(

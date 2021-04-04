@@ -171,3 +171,16 @@ def generate_polynomial_features(feature_list, train, tournament):
     tournament = pd.concat([tournament, X_best_tournament_inter],axis=1)
 
     return train, tournament
+
+def clean_era(df):
+    df['era'] = df.loc[:, 'era'].str[3:].astype('int32')
+    return df
+
+def setup_xgboost_training(train):
+    X, y = clean_for_xgboost(train)
+    from sklearn.model_selection import train_test_split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
+    
+    dtrain = xgboost.DMatrix(X_train, y_train)
+    dtest = xgboost.DMatrix(X_test, y_test)
+    return dtrain, dtest
