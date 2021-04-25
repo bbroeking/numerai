@@ -25,3 +25,4 @@ a.out
 .vscode/
 # Local History for Visual Studio Code
 .history/
+*.csv

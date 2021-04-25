@@ -20,7 +20,9 @@ NAPI = numerapi.NumerAPI(verbosity="info")
 TARGET_NAME = f"target"
 PREDICTION_NAME = f"prediction"
 
-MODEL_FILE = Path("models/boomkin/model.pickle.dat")
+# MODEL_FILE = Path("models/boomkin/model_boomkin.pkl")
+
+MODEL_FILE = Path("model_boomkin.pkl")
 
 
 # Submissions are scored by spearman correlation
@@ -65,6 +67,7 @@ def main():
     feature_names = generate_features_list(training_data)
     print(f"Loaded {len(feature_names)} features")
 
+    current_round = NAPI.get_current_round()
     model = load_model(MODEL_FILE)
 
     # Generate predictions on both training and tournament data
@@ -113,7 +116,7 @@ def main():
     print(f"Feature Neutral Mean is {feature_neutral_mean}")
 
     # Load example preds to get MMC metrics
-    example_preds = pd.read_csv("example_predictions.csv").set_index("id")["prediction"]
+    example_preds = pd.read_csv(f"../../data/numerai_dataset_{current_round}/example_predictions.csv").set_index("id")["prediction"]
     validation_example_preds = example_preds[validation_data.index].values
     validation_data.loc[:, "ExamplePreds"] = validation_example_preds
     print("calculating MMC stats...")
@@ -145,10 +148,14 @@ def main():
     print(f"Corr with example preds: {corr_with_example_preds}")
 
     # Save predictions as a CSV and upload to https://numer.ai
-    current_round = NAPI.get_current_round()
     tournament_data.set_index('id', inplace=True)
-    tournament_data[PREDICTION_NAME].to_csv(f"submissions/qurty/submission_{current_round}.csv", header=True)
+    tournament_data[PREDICTION_NAME].to_csv(f"../../submissions/boomkin/submission_{current_round}.csv", header=True)
 
+    # Neutralize
+    neutralized = tournament_data.copy()
+    neutralized.loc[:, PREDICTION_NAME] = neutralize_series(tournament_data[PREDICTION_NAME], 
+                                                        example_preds, 0.25)
+    neutralized[PREDICTION_NAME].to_csv(f"../../submissions/boomkin/submission_{current_round}_neutralized.csv", header=True)
 
 """ 
 functions used for advanced metrics
