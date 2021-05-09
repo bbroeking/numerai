@@ -195,3 +195,23 @@ def autocorr_penalty(x):
 
 def smart_sharpe(x):
     return np.mean(x)/(np.std(x, ddof=1)*autocorr_penalty(x))
+
+def pull_val_set(tournament):
+    val1 = ['era121', 'era122', 'era123', 'era124', 'era125', 'era126',
+       'era127', 'era128', 'era129', 'era130', 'era131', 'era132',
+       'era197', 'era198', 'era199']
+    val2 = ['era200', 'era201', 'era202',
+        'era203', 'era204', 'era205', 'era206', 'era207', 'era208',
+        'era209', 'era210', 'era211', 'era212']
+    val_set1 = tournament[tournament.era.isin(val1)]
+    val_set2 = tournament[tournament.era.isin(val2)]
+    return val_set1, val_set2
+
+def generate_val():
+    X_val1, y_val1 = clean_for_xgboost(val_set1)
+    dval1 = xgboost.DMatrix(X_val1, y_val1)
+
+    X_val2, y_val2 = clean_for_xgboost(val_set2)
+    dval2 = xgboost.DMatrix(X_val2, y_val2)
+
+    return dval1, dval2

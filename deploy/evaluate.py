@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from xgboost import XGBRegressor
-from models.qurty.data_preparation import prepare_data
+from models.burningcrusade.data_preparation import prepare_data
 from helpers.utils import generate_features_list, load_model, clean_for_xgboost
 import xgboost
 
@@ -20,21 +20,24 @@ NAPI = numerapi.NumerAPI(verbosity="info")
 TARGET_NAME = f"target"
 PREDICTION_NAME = f"prediction"
 
-MODEL_FILE = Path("model_qurty.pickle.dat")
-ERA_BOOSTED_MODEL_FILE = Path("era_boosted_qurty.pkl")
+MODEL_FILE = Path("burningcrusade.pkl")
+
 
 # Submissions are scored by spearman correlation
 def correlation(predictions, targets):
     ranked_preds = predictions.rank(pct=True, method="first")
     return np.corrcoef(ranked_preds, targets)[0, 1]
 
+
 # convenience method for scoring
 def score(df):
     return correlation(df[PREDICTION_NAME], df[TARGET_NAME])
 
+
 # Payout is just the score cliped at +/-25%
 def payout(scores):
     return scores.clip(lower=-0.25, upper=0.25)
+
 
 # Read the csv file into a pandas Dataframe as float16 to save space
 def read_csv(file_path):
@@ -43,9 +46,38 @@ def read_csv(file_path):
 
     dtypes = {x: np.float16 for x in column_names if x.startswith(('feature', 'target'))}
     df = pd.read_csv(file_path, dtype=dtypes, index_col=0)
+
+    # Memory constrained? Try this instead (slower, but more memory efficient)
+    # see https://forum.numer.ai/t/saving-memory-with-uint8-features/254
+    # dtypes = {f"target": np.float16}
+    # to_uint8 = lambda x: np.uint8(float(x) * 4)
+    # converters = {x: to_uint8 for x in column_names if x.startswith('feature')}
+    # df = pd.read_csv(file_path, dtype=dtypes, converters=converters)
+
     return df
 
-def evaluate(training_data, tournament_data, feature_names):
+
+def main():
+    print("Loading data...")
+    # The training data is used to train your model how to predict the targets.
+    training_data, tournament_data = prepare_data()
+    # The tournament data is the data that Numerai uses to evaluate your model.
+    feature_names = generate_features_list(training_data)
+    print(f"Loaded {len(feature_names)} features")
+
+    model = load_model(MODEL_FILE)
+    current_round = NAPI.get_current_round()
+
+    # Generate predictions on both training and tournament data
+    X_train, y_train = clean_for_xgboost(training_data)
+    X_test, y_test = clean_for_xgboost(tournament_data)
+    dtrain = xgboost.DMatrix(X_train, y_train)
+    dtest = xgboost.DMatrix(X_test, y_test)
+    print("Generating predictions...")
+    training_data.loc[:, PREDICTION_NAME] = model.predict(dtrain)
+    tournament_data.loc[:, PREDICTION_NAME] = model.predict(dtest)
+
+    # Check the per-era correlations on the training set (in sample)
     train_correlations = training_data.groupby("era").apply(score)
     print(f"On training the correlation has mean {train_correlations.mean()} and std {train_correlations.std(ddof=0)}")
     print(f"On training the average per-era payout is {payout(train_correlations).mean()}")
@@ -112,48 +144,16 @@ def evaluate(training_data, tournament_data, feature_names):
     corr_with_example_preds = per_era_corrs.mean()
     print(f"Corr with example preds: {corr_with_example_preds}")
 
-
-def main():
-    print("Loading data...")
-    # The training data is used to train your model how to predict the targets.
-    training_data, tournament_data = prepare_data(ft_corr_list='qurty_ft_corr_list.pickle.dat')
-    # The tournament data is the data that Numerai uses to evaluate your model.
-    feature_names = generate_features_list(training_data)
-    print(f"Loaded {len(feature_names)} features")
-    model = load_model(MODEL_FILE)
-    era_boosted_model = load_model(ERA_BOOSTED_MODEL_FILE)
-    current_round = NAPI.get_current_round()
-
-    # Generate predictions on both training and tournament data
-    print("Generating predictions...")
-    X_train, y_train = clean_for_xgboost(training_data)
-    X_test, y_test = clean_for_xgboost(tournament_data)
-
-    dtrain = xgboost.DMatrix(X_train, y_train)
-    dtest = xgboost.DMatrix(X_test, y_test)
-    training_data.loc[:, PREDICTION_NAME] = model.predict(dtrain)
-    tournament_data.loc[:, PREDICTION_NAME] = model.predict(dtest)
-    era_boosted_training = training_data.copy()
-    era_boosted_tournament = tournament_data.copy()
-    era_boosted_training.loc[:, PREDICTION_NAME] = era_boosted_model.predict(X_train)
-    era_boosted_tournament.loc[:, PREDICTION_NAME] = era_boosted_model.predict(X_test)
-    # Check the per-era correlations on the training set (in sample)
-    print("Generating Metrics")
-    evaluate(training_data, tournament_data, feature_names)
-    evaluate(era_boost_training, era_boost_tournament, feature_names)
-
     # Save predictions as a CSV and upload to https://numer.ai
     tournament_data.set_index('id', inplace=True)
-    tournament_data[PREDICTION_NAME].to_csv(f"../../submissions/qurty/submission_{current_round}_qurty.csv", header=True)
+    tournament_data[PREDICTION_NAME].to_csv(f"../../submissions/qurty/submission_{current_round}.csv", header=True)
 
-       # Neutralize
+    # Neutralize
     neutralized = tournament_data.copy()
     neutralized.loc[:, PREDICTION_NAME] = neutralize_series(tournament_data[PREDICTION_NAME], 
                                                         example_preds, 0.25)
-    neutralized[PREDICTION_NAME].to_csv(f"../../submissions/qurty/submission_{current_round}_neutralized_qurty.csv", header=True)
-    # Era boosted 
-    era_boosted_tournament.set_index('id', inplace=True)
-    era_boosted_tournament[PREDICTION_NAME].to_csv(f"../../submissions/qurty/era_boosted_submission_{current_round}_qurty.csv", header=['prediction'])
+    neutralized[PREDICTION_NAME].to_csv(f"../../submissions/qurty/submission_{current_round}_neutralized.csv", header=True)
+
 """ 
 functions used for advanced metrics
 """

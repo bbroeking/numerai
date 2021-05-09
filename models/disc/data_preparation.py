@@ -3,7 +3,7 @@ from helpers.constants import Constants as constants
 import pickle
 
 DIR = constants.DIR
-DEFAULT_FT_CORR_LIST = 'disc_features1.prk'
+DEFAULT_FT_CORR_LIST = 'disc_features1.pkl'
 
 def prepare_data(ft_corr_list=None):
     download_current_data(DIR)

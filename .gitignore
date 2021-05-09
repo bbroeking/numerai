@@ -26,3 +26,10 @@ a.out
 # Local History for Visual Studio Code
 .history/
 *.csv
+*.pkl
+
+# ignore some cloned repos
+experiments/cv_test
+
+# ignore models
+models/qurty/era_boosted_qurty.pkl
