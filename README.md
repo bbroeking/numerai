@@ -4,13 +4,13 @@ The worlds hardest data science competition. Right now this repo contains the im
 
 ## Models
 # Current results
-![alt text](https://github.com/bbroeking/numerai/blob/main/graph.png?raw=true)
+![Screenshot](https://github.com/bbroeking/numerai/blob/main/imgs/graph.png?raw=true)
 
 # Staked Models 
 ## qurty
 Model Diagnostics
-![alt text](https://github.com/bbroeking/numerai/blob/main/qurty_diagnostics.png?raw=true)
+![Screenshot](https://github.com/bbroeking/numerai/blob/main/imgs/qurty_diagnostics.png?raw=true)
 
 ## boomkin
 Model Diagnostics
-![alt text](https://github.com/bbroeking/numerai/blob/main/boomkin_diagnostics.png?raw=true)
+![Screenshot](https://github.com/bbroeking/numerai/blob/main/imgs/boomkin_diagnostics.png?raw=true)
